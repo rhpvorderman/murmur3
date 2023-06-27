@@ -231,6 +231,7 @@ void MurmurHash3_x86_128 ( const void * key, const int len,
 
 //-----------------------------------------------------------------------------
 
+#ifndef __SSE2__
 void MurmurHash3_x64_128 ( const void * key, const int len,
                            const uint32_t seed, void * out )
 {
@@ -310,6 +311,136 @@ void MurmurHash3_x64_128 ( const void * key, const int len,
   ((uint64_t*)out)[0] = h1;
   ((uint64_t*)out)[1] = h2;
 }
+#else 
+#include "emmintrin.h"
 
+/* https://stackoverflow.com/a/54191950 */
+static FORCE_INLINE __m128i Multiply64Bit(__m128i ab, __m128i cd)
+{
+    /* ac = (ab & 0xFFFFFFFF) * (cd & 0xFFFFFFFF); */
+    __m128i ac = _mm_mul_epu32(ab, cd);
+
+    /* b = ab >> 32; */
+    __m128i b = _mm_srli_epi64(ab, 32);
+
+    /* bc = b * (cd & 0xFFFFFFFF); */
+    __m128i bc = _mm_mul_epu32(b, cd);
+
+    /* d = cd >> 32; */
+    __m128i d = _mm_srli_epi64(cd, 32);
+
+    /* ad = (ab & 0xFFFFFFFF) * d; */
+    __m128i ad = _mm_mul_epu32(ab, d);
+
+    /* high = bc + ad; */
+    __m128i high = _mm_add_epi64(bc, ad);
+
+    /* high <<= 32; */
+    high = _mm_slli_epi64(high, 32);
+
+    /* return ac + high; */
+    return _mm_add_epi64(high, ac);
+}
+
+static FORCE_INLINE __m128i fmix128 ( __m128i k )
+{
+  __m128i tmp = _mm_srli_epi64(k, 33);
+  k = _mm_xor_si128(k, tmp);
+  k = Multiply64Bit(k, _mm_set1_epi64x(BIG_CONSTANT(0xff51afd7ed558ccd)));
+  tmp = _mm_srli_epi64(k, 33);
+  k = _mm_xor_si128(k, tmp);
+  k = Multiply64Bit(k, _mm_set1_epi64x(BIG_CONSTANT(0xc4ceb9fe1a85ec53)));
+  tmp = _mm_srli_epi64(k, 33);
+  k = _mm_xor_si128(k, tmp);
+  return k;
+}
+
+static FORCE_INLINE __m128i rotl128 ( __m128i x, __m128i r )
+{
+  __m128i x1 = _mm_sll_epi64(x, r);
+  __m128i x2 = _mm_srl_epi64(x, (_mm_sub_epi64(_mm_set1_epi64x(64), r)));
+  return _mm_or_si128(x1, x2);
+}
+
+static FORCE_INLINE __m128i reverse128(__m128i x) {
+  __m128i x1 = _mm_srli_si128(x, 8);
+  __m128i x2 = _mm_slli_si128(x, 8);
+  return _mm_or_si128(x1, x2);
+}
+
+void MurmurHash3_x64_128 ( const void * key, const int len,
+                           const uint32_t seed, void * out )
+{
+  const uint8_t * data = (const uint8_t*)key;
+  const int nblocks = len / 16;
+  int i;
+
+  __m128i h = _mm_set_epi64x(seed, seed);
+  __m128i c1 = _mm_set_epi64x(BIG_CONSTANT(0x87c37b91114253d5),
+                              BIG_CONSTANT(0x4cf5ad432745937f));
+  __m128i c2 = _mm_set_epi64x(BIG_CONSTANT(0x4cf5ad432745937f),
+                              BIG_CONSTANT(0x87c37b91114253d5));
+
+
+  //----------
+  // body
+
+  const __m128i * blocks = (const __m128i *)(data);
+
+  for(i = 0; i < nblocks; i++)
+  {
+    __m128i k = _mm_loadu_si128(blocks + i);
+    
+    k = Multiply64Bit(k, c1); 
+    k = rotl128(k, _mm_set_epi64x(31, 33));
+    k = Multiply64Bit(k, c2);
+    h = _mm_xor_si128(h, k);
+    h = rotl128(h, _mm_set_epi64x(27,31));
+    h = _mm_add_epi64(h, reverse128(h));
+    h = Multiply64Bit(h, _mm_set1_epi64x(5));
+    h = _mm_add_epi64(h, _mm_set_epi64x(0x52dce729, 0x38495ab5));
+  }
+
+  //----------
+  // tail
+
+  const uint8_t * tail = (const uint8_t*)(data + nblocks*16);
+
+  uint64_t k1 = 0;
+  uint64_t k2 = 0;
+
+  switch(len & 15)
+  {
+  case 15: k2 ^= (uint64_t)(tail[14]) << 48;
+  case 14: k2 ^= (uint64_t)(tail[13]) << 40;
+  case 13: k2 ^= (uint64_t)(tail[12]) << 32;
+  case 12: k2 ^= (uint64_t)(tail[11]) << 24;
+  case 11: k2 ^= (uint64_t)(tail[10]) << 16;
+  case 10: k2 ^= (uint64_t)(tail[ 9]) << 8;
+  case  9: k2 ^= (uint64_t)(tail[ 8]) << 0;
+
+  case  8: k1 ^= (uint64_t)(tail[ 7]) << 56;
+  case  7: k1 ^= (uint64_t)(tail[ 6]) << 48;
+  case  6: k1 ^= (uint64_t)(tail[ 5]) << 40;
+  case  5: k1 ^= (uint64_t)(tail[ 4]) << 32;
+  case  4: k1 ^= (uint64_t)(tail[ 3]) << 24;
+  case  3: k1 ^= (uint64_t)(tail[ 2]) << 16;
+  case  2: k1 ^= (uint64_t)(tail[ 1]) << 8;
+  case  1: k1 ^= (uint64_t)(tail[ 0]) << 0;
+  };
+  //----------
+  // finalization
+  __m128i k = _mm_set_epi64x(k1, k2); 
+  k = Multiply64Bit(k, c1);
+  k = rotl128(k, _mm_set_epi64x(31, 33));
+  k = Multiply64Bit(k, c2);
+  h = _mm_xor_si128(h, k); 
+  h = _mm_xor_si128(h, _mm_set1_epi64x(len));
+  h = _mm_add_epi64(h, reverse128(h));
+  h = fmix128(h); 
+  h = _mm_add_epi64(h, reverse128(h));
+  _mm_store_si128(out, h);
+}
+#endif
 //-----------------------------------------------------------------------------
 
