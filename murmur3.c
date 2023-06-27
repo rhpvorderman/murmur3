@@ -231,7 +231,6 @@ void MurmurHash3_x86_128 ( const void * key, const int len,
 
 //-----------------------------------------------------------------------------
 
-#ifndef __SSE2__
 void MurmurHash3_x64_128 ( const void * key, const int len,
                            const uint32_t seed, void * out )
 {
@@ -311,7 +310,7 @@ void MurmurHash3_x64_128 ( const void * key, const int len,
   ((uint64_t*)out)[0] = h1;
   ((uint64_t*)out)[1] = h2;
 }
-#else 
+#ifdef __SSE2__
 #include "emmintrin.h"
 
 /* https://stackoverflow.com/a/54191950 */
@@ -368,7 +367,7 @@ static FORCE_INLINE __m128i reverse128(__m128i x) {
   return _mm_or_si128(x1, x2);
 }
 
-void MurmurHash3_x64_128 ( const void * key, const int len,
+void MurmurHash3_SSE2_128 ( const void * key, const int len,
                            const uint32_t seed, void * out )
 {
   const uint8_t * data = (const uint8_t*)key;

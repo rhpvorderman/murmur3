@@ -44,6 +44,11 @@ int main(void) {
     TESTHASH(x64, 128, 123, "xxxxxxxxxxxxxxxxxxxxxxxxxxxx", "becf7e04dbcf74637751664ef66e73e0");
     TESTHASH(x64, 128, 123, "", "4cd9597081679d1abd92f8784bace33d");
 
+    TESTHASH(SSE2, 128, 123, "Hello, world!", "8743acad421c8c73d373c3f5f19732fd");
+    TESTHASH(SSE2, 128, 321, "Hello, world!", "f86d4004ca47f42bb9546c7979200aee");
+    TESTHASH(SSE2, 128, 123, "xxxxxxxxxxxxxxxxxxxxxxxxxxxx", "becf7e04dbcf74637751664ef66e73e0");
+    TESTHASH(SSE2, 128, 123, "", "4cd9597081679d1abd92f8784bace33d");
+
     printf("Total tests: %i\nPassed: %i\nFailed: %i\n", passed + failed, passed, failed);
     return failed > 0;
 }
